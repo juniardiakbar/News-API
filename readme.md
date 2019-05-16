@@ -10,6 +10,7 @@ Request:
 ```
 http://localhost:8080/v2/everything?q=bitcoin&sortBy=publishedAt
 ```
+<<<<<<< HEAD
 
 ## DATABASE MODEL
 
@@ -35,3 +36,6 @@ CREATE TABLE key(
     key VARCHAR(500) NOT NULL
 );
 ```
+=======
+sortBy can only accept publishedAt or title
+>>>>>>> ee77adf165b38f548a11afc7ee3dfae3da37920c
