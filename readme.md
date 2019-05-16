@@ -10,3 +10,4 @@ Request:
 ```
 http://localhost:8080/v2/everything?q=bitcoin&sortBy=publishedAt
 ```
+sortBy can only accept publishedAt or title
