@@ -1,17 +1,20 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/render"
+
+	_ "github.com/lib/pq"
 )
 
 // Articles struct which contains an array of artilce
@@ -38,36 +41,15 @@ type Source struct {
 	Name string `json:"name"`
 }
 
-func sortArticles(res []Article, sort string) {
-	if sort == "title" && len(res) > 1 {
-		for i := 0; i < len(res)-1; i++ {
-			for j := i + 1; j < len(res); j++ {
-				if res[i].Title > res[j].Title {
-					res[i], res[j] = res[j], res[i]
-				}
-			}
-		}
-	} else if sort == "publishedat" && len(res) > 1 {
-		layout := "2006-01-02T15:04:05Z"
-		for i := 0; i < len(res)-1; i++ {
-			for j := i + 1; j < len(res); j++ {
-				t1, err := time.Parse(layout, res[i].PublishedAt)
-				if err != nil {
-					fmt.Println(err)
-				}
-				t2, err := time.Parse(layout, res[j].PublishedAt)
-				if err != nil {
-					fmt.Println(err)
-				}
-				if t2.Before(t1) {
-					res[i], res[j] = res[j], res[i]
-				}
-			}
-		}
-	}
-}
+const (
+	HOST       = "localhost"
+	PORT       = 5432
+	DBUSER     = "postgres"
+	DBPASSWORD = "password"
+	DBNAME     = "postgres"
+)
 
-func getNews(w http.ResponseWriter, r *http.Request) {
+func database() {
 	database, err := os.Open("database.json")
 	if err != nil {
 		fmt.Println(err)
@@ -77,36 +59,101 @@ func getNews(w http.ResponseWriter, r *http.Request) {
 	byteValue, _ := ioutil.ReadAll(database)
 
 	var articles Articles
-	var result []Article
 
 	json.Unmarshal([]byte(byteValue), &articles)
 
-	q := r.URL.Query().Get("q")
-	sort := r.URL.Query().Get("sortBy")
-
 	keyTable := articles.APIKey
 	articlesTable := articles.Articles
-	fmt.Println(keyTable)
+
+	dbinfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", HOST, PORT, DBUSER, DBPASSWORD, DBNAME)
+	db, err := sql.Open("postgres", dbinfo)
+
+	if err != nil {
+		fmt.Println("ERROR :", err)
+	}
 
 	for i := 0; i < len(articlesTable); i++ {
-		if strings.Contains(articlesTable[i].Title, q) == false {
-			if strings.Contains(articlesTable[i].Content, q) == false {
-				if strings.Contains(articlesTable[i].Description, q) != false {
-					result = append(result, articlesTable[i])
-				}
-			} else {
-				result = append(result, articlesTable[i])
-			}
-		} else {
-			result = append(result, articlesTable[i])
+		sqlStatement := "INSERT INTO Articles VALUES (" + strconv.Itoa(i+1) + `, '{"id":` + strconv.Itoa(articlesTable[i].Source.ID) + `,"name":"` + articlesTable[i].Source.Name + `"}', ` + `'` + articlesTable[i].Author + `', '` + articlesTable[i].Title + `', '` + articlesTable[i].Description + `', '` + articlesTable[i].URL + `', '` + articlesTable[i].URLToImage + `', '` + articlesTable[i].PublishedAt + `', '` + articlesTable[i].Content + `')`
+
+		_, err := db.Exec(sqlStatement)
+		if err != nil {
+			fmt.Println(err)
 		}
 	}
 
-	if strings.ToLower(sort) == "publishedat" || strings.ToLower(sort) == "title" {
-		sortArticles(result, sort)
+	sqlStatement := "INSERT INTO Key VALUES (1,'" + keyTable + "')"
+
+	_, err = db.Exec(sqlStatement)
+	if err != nil {
+		fmt.Println(err)
 	}
 
-	render.JSON(w, r, result)
+}
+
+func getNews(w http.ResponseWriter, r *http.Request) {
+	database()
+	q := r.URL.Query().Get("q")
+	sort := r.URL.Query().Get("sortBy")
+
+	dbinfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", HOST, PORT, DBUSER, DBPASSWORD, DBNAME)
+
+	db, err := sql.Open("postgres", dbinfo)
+
+	if err != nil {
+		fmt.Println("ERROR :", err)
+	}
+
+	var sqlStatement string
+	if strings.ToLower(sort) == "title" {
+		sqlStatement = "SELECT * FROM Articles WHERE title LIKE '%" + q + "%' OR decription LIKE '%" + q + "%' OR content LIKE '%" + q + "%' ORDER BY title"
+	} else if strings.ToLower(sort) == "publishedat" {
+		sqlStatement = "SELECT * FROM Articles WHERE title LIKE '%" + q + "%' OR decription LIKE '%" + q + "%' OR content LIKE '%" + q + "%' ORDER BY publishedAt"
+	} else {
+		sqlStatement = "SELECT * FROM Articles WHERE title LIKE '%" + q + "%' OR decription LIKE '%" + q + "%' OR content LIKE '%" + q + "%'"
+	}
+
+	result, err := db.Query(sqlStatement)
+	if err != nil {
+		fmt.Println("ERROR :", err)
+	}
+
+	var out []Article
+
+	for result.Next() {
+		var (
+			id          int
+			source      string
+			author      string
+			title       string
+			decription  string
+			url         string
+			urlToImage  string
+			publishedAt string
+			content     string
+			tempSource  Source
+			temp        Article
+		)
+		err = result.Scan(&id, &source, &author, &title, &decription, &url, &urlToImage, &publishedAt, &content)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		err = json.Unmarshal([]byte(source), &tempSource)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		temp.Source = tempSource
+		temp.Author = author
+		temp.Title = title
+		temp.Description = decription
+		temp.URL = url
+		temp.URLToImage = urlToImage
+		temp.PublishedAt = publishedAt
+		temp.Content = content
+		out = append(out, temp)
+	}
+	render.JSON(w, r, out)
 }
 
 func main() {
