@@ -6,6 +6,7 @@
 - First table is API Key tabel (keyTabele)
 - Second table is articles table (articlesTable)
 - API receive string q as query and string sortBy for sorting 
+
 Request:
 ```
 http://localhost:8080/v2/everything?q=bitcoin&sortBy=publishedAt
